@@ -48,4 +48,9 @@ src/
 The game state follows the board game's structure with players, board state, markets, current player/phase/era tracking, and turn management.
 
 ### Development Workflow
-This project follows a milestone-based development approach with 6 planned milestones covering foundation, game logic, board components, UI components, game flow, and polish phases.
+1. Create feature branch: `git checkout -b feature/amazing-feature`
+2. Make changes and test thoroughly
+3. Run linting: `npm run lint`
+4. Commit changes: `git commit -m 'Add amazing feature'`
+5. Push branch: `git push origin feature/amazing-feature`
+6. Open Pull Request
