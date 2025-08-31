@@ -1,4 +1,7 @@
-// Components directory
-// This will contain all React components for the Brass Birmingham game
+// UI Components
+export { Button } from './UI/Button'
+export { Input } from './UI/Input'
 
-export {};
+// Game Setup Components
+export { GameSetup } from './GameSetup/GameSetup'
+export { PlayerSetup } from './GameSetup/PlayerSetup'

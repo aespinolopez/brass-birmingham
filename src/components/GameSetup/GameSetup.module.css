@@ -1,0 +1,141 @@
+.gameSetup {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.container {
+  max-width: 800px;
+  width: 100%;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  margin: 0 auto;
+}
+
+.header {
+  text-align: center;
+  padding: 40px 40px 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.title {
+  font-size: 48px;
+  font-weight: 800;
+  color: #1f2937;
+  margin: 0 0 8px;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.subtitle {
+  font-size: 18px;
+  color: #6b7280;
+  margin: 0;
+}
+
+.setupForm {
+  padding: 32px 40px 40px;
+}
+
+.playerCountSection {
+  margin-bottom: 48px;
+}
+
+.sectionTitle {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0 0 20px;
+}
+
+.playerCountOptions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-start;
+}
+
+.playerCountButton {
+  padding: 12px 24px;
+  border: 2px solid #e5e7eb;
+  border-radius: 12px;
+  background: white;
+  color: #374151;
+  font-weight: 600;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.playerCountButton:hover {
+  border-color: #2563eb;
+  background-color: #eff6ff;
+}
+
+.playerCountButton.active {
+  border-color: #2563eb;
+  background-color: #2563eb;
+  color: white;
+}
+
+.playersSection {
+  margin-bottom: 48px;
+}
+
+.playersGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.actions {
+  display: flex;
+  justify-content: center;
+  padding-top: 32px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.startButton {
+  min-width: 200px;
+}
+
+@media (max-width: 640px) {
+  .gameSetup {
+    padding: 20px 16px;
+  }
+  
+  .container {
+    border-radius: 12px;
+  }
+  
+  .header {
+    padding: 24px 24px 16px;
+  }
+  
+  .title {
+    font-size: 36px;
+  }
+  
+  .subtitle {
+    font-size: 16px;
+  }
+  
+  .setupForm {
+    padding: 24px;
+  }
+  
+  .playerCountOptions {
+    flex-wrap: wrap;
+  }
+  
+  .playerCountButton {
+    flex: 1;
+    min-width: 120px;
+  }
+}

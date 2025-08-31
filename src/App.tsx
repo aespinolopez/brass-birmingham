@@ -1,28 +1,51 @@
 import { useState } from 'react'
+import { GameProvider } from '@/hooks'
+import { GameSetup } from '@/components/GameSetup/GameSetup'
 import './App.css'
 
+type AppState = 'setup' | 'game'
+
 function App() {
-  const [count, setCount] = useState(0)
+  const [appState, setAppState] = useState<AppState>('setup')
+
+  const handleGameStart = () => {
+    setAppState('game')
+  }
+
+  const handleBackToSetup = () => {
+    setAppState('setup')
+  }
 
   return (
-    <>
+    <GameProvider>
       <div className="app">
-        <header>
-          <h1>Brass Birmingham</h1>
-          <p>Digital board game implementation coming soon...</p>
-        </header>
-        <main>
-          <div className="card">
-            <button onClick={() => setCount((count) => count + 1)}>
-              Development counter: {count}
-            </button>
-            <p>
-              Project setup complete. Ready for development!
-            </p>
+        {appState === 'setup' && (
+          <GameSetup onGameStart={handleGameStart} />
+        )}
+        {appState === 'game' && (
+          <div className="gameView">
+            <header className="gameHeader">
+              <h1>Brass Birmingham</h1>
+              <button 
+                className="backButton" 
+                onClick={handleBackToSetup}
+              >
+                Back to Setup
+              </button>
+            </header>
+            <main className="gameMain">
+              <div className="gamePlaceholder">
+                <h2>Game Board Coming Soon</h2>
+                <p>
+                  The game has been initialized successfully! 
+                  The game board and player interface will be implemented in future updates.
+                </p>
+              </div>
+            </main>
           </div>
-        </main>
+        )}
       </div>
-    </>
+    </GameProvider>
   )
 }
 
