@@ -2,6 +2,7 @@ import { createContext, useContext, useReducer, ReactNode } from 'react'
 import type { GameState, GameAction, Player } from '@/types'
 import { gameReducer } from './gameReducer'
 import { validatePlayerAction, validateGameState, shouldGameEnd } from './gameValidation'
+import { ERA_TURN_LIMITS } from '@/data'
 
 /**
  * Initial game state
@@ -59,18 +60,53 @@ interface GameContextType {
 const GameContext = createContext<GameContextType | undefined>(undefined)
 
 /**
+ * Process automatic state transitions in the correct order to avoid race conditions
+ */
+function processAutomaticTransitions(state: GameState): GameState {
+  let currentState = state
+  
+  // 1. First check if era should advance (highest priority)
+  if (currentState.era === 'canal' && currentState.turn > ERA_TURN_LIMITS.canal && !currentState.gameEnded) {
+    currentState = gameReducer(currentState, {
+      type: 'ADVANCE_ERA',
+      playerId: ''
+    } as GameAction)
+  }
+  
+  // 2. Then check if phase should advance (only if still in action phase)
+  if (currentState.phase === 'action' && !currentState.gameEnded) {
+    const allPlayersFinished = currentState.players.every(player => player.actionsRemaining === 0)
+    if (allPlayersFinished) {
+      currentState = gameReducer(currentState, {
+        type: 'END_PHASE',
+        playerId: ''
+      } as GameAction)
+    }
+  }
+  
+  // 3. Finally check if game should end (lowest priority)
+  if (shouldGameEnd(currentState) && !currentState.gameEnded) {
+    currentState = gameReducer(currentState, {
+      type: 'END_GAME',
+      playerId: ''
+    } as GameAction)
+  }
+  
+  return currentState
+}
+
+/**
  * Enhanced reducer with validation and side effects
  */
 function enhancedGameReducer(state: GameState, action: GameAction): GameState {
-  // Validate action before processing
-  const validation = validatePlayerAction(state, action)
-  if (!validation.valid && action.type !== 'INITIALIZE_GAME' && action.type !== 'RESET_GAME') {
-    console.warn('Invalid action:', validation.error, action)
+  // Process the action (validation is handled within individual reducers for better context)
+  const newState = gameReducer(state, action)
+  
+  // If the state didn't change, the action was invalid
+  if (newState === state && action.type !== 'INITIALIZE_GAME' && action.type !== 'RESET_GAME') {
+    console.warn('Action was rejected:', action)
     return state
   }
-  
-  // Process the action
-  const newState = gameReducer(state, action)
   
   // Validate the resulting state
   const stateValidation = validateGameState(newState)
@@ -79,35 +115,8 @@ function enhancedGameReducer(state: GameState, action: GameAction): GameState {
     return state // Return previous state if validation fails
   }
   
-  // Check for automatic state transitions
-  let finalState = newState
-  
-  // Auto-advance phase if all players have finished their actions
-  if (finalState.phase === 'action') {
-    const allPlayersFinished = finalState.players.every(player => player.actionsRemaining === 0)
-    if (allPlayersFinished) {
-      finalState = gameReducer(finalState, {
-        type: 'END_PHASE',
-        playerId: ''
-      } as GameAction)
-    }
-  }
-  
-  // Auto-end game if conditions are met
-  if (shouldGameEnd(finalState) && !finalState.gameEnded) {
-    finalState = gameReducer(finalState, {
-      type: 'END_GAME',
-      playerId: ''
-    } as GameAction)
-  }
-  
-  // Auto-advance era if canal era is complete
-  if (finalState.era === 'canal' && finalState.turn > 8) {
-    finalState = gameReducer(finalState, {
-      type: 'ADVANCE_ERA',
-      playerId: ''
-    } as GameAction)
-  }
+  // Apply automatic state transitions in proper order
+  const finalState = processAutomaticTransitions(newState)
   
   return finalState
 }

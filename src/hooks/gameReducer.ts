@@ -1,6 +1,19 @@
 import { produce } from 'immer'
 import type { GameState, Player, BuiltIndustry } from '@/types'
 import type { GameAction, InitializeGameAction, BuildIndustryAction, DevelopLocationAction, SellGoodsAction, TakeLoanAction, PassAction, PlayCardAction, DiscardCardsAction, BuyResourcesAction } from '@/types'
+
+
+/**
+ * Log game action error with context
+ */
+function logGameError(error: string, action: GameAction, details?: Record<string, unknown>) {
+  console.error(`[Game Error] ${error}`, {
+    actionType: action.type,
+    playerId: action.playerId,
+    action,
+    details
+  })
+}
 import { 
   locations, 
   industryTiles, 
@@ -16,7 +29,8 @@ import {
   getIncomeForLevel,
   purchaseFromMarket,
   sellToMarket,
-  connections
+  connections,
+  MONEY_TO_VICTORY_POINTS_RATIO
 } from '@/data'
 
 /**
@@ -121,7 +135,7 @@ function initializeGame(_draft: GameState, action: InitializeGameAction): GameSt
     connections: [...connections],
     builtIndustries: [],
     builtConnections: [],
-    availableTiles: JSON.parse(JSON.stringify(industryTiles))
+    availableTiles: produce(industryTiles, (draft) => draft)
   }
   
   // Initialize markets
@@ -145,72 +159,107 @@ function initializeGame(_draft: GameState, action: InitializeGameAction): GameSt
 }
 
 /**
- * Handle building an industry at a location
+ * Validate industry build requirements
  */
-function buildIndustry(draft: GameState, action: BuildIndustryAction): GameState {
+function validateIndustryBuild(draft: GameState, action: BuildIndustryAction): 
+  | { valid: false; error: string }
+  | { valid: true; player: Player; location: any; tile: any; tileIndex: number; availableTiles: any[]; totalCost: number } {
   const { playerId, locationId, industryType, tileId, coalUsed, ironUsed } = action
   
-  // Find player and validate
   const player = draft.players.find(p => p.id === playerId)
   if (!player) {
-    console.error('Player not found:', playerId)
-    return draft
+    return { valid: false, error: 'Player not found' }
   }
   
-  // Validate it's player's turn
   if (draft.players[draft.currentPlayer].id !== playerId) {
-    console.error('Not player turn:', playerId)
-    return draft
+    return { valid: false, error: 'Not player turn' }
   }
   
-  // Validate player has actions remaining
   if (player.actionsRemaining <= 0) {
-    console.error('No actions remaining for player:', playerId)
-    return draft
+    return { valid: false, error: 'No actions remaining' }
   }
   
-  // Find location and validate
   const location = draft.board.locations.find(l => l.id === locationId)
   if (!location) {
-    console.error('Location not found:', locationId)
-    return draft
+    return { valid: false, error: 'Location not found' }
   }
   
-  // Validate industry type is allowed at location
   if (!location.allowedIndustries.includes(industryType)) {
-    console.error('Industry type not allowed at location:', industryType, locationId)
-    return draft
+    return { valid: false, error: 'Industry type not allowed at location' }
   }
   
-  // Find available tile
+  const industriesAtLocation = draft.board.builtIndustries.filter(ind => ind.locationId === locationId)
+  if (industriesAtLocation.length >= location.industrySlots) {
+    return { valid: false, error: 'Location is full' }
+  }
+  
   const availableTiles = draft.board.availableTiles[industryType as keyof typeof draft.board.availableTiles][draft.era]
   const tileIndex = availableTiles.findIndex((tile) => tile.id === tileId)
   
   if (tileIndex === -1) {
-    console.error('Industry tile not available:', tileId)
-    return draft
+    return { valid: false, error: 'Industry tile not available' }
   }
   
   const tile = availableTiles[tileIndex]
-  
-  // Validate player has required resources and money
   const totalCost = tile.cost + (coalUsed * getLowestResourcePrice(draft.market, 'coal')) + (ironUsed * getLowestResourcePrice(draft.market, 'iron'))
   
   if (player.money < totalCost) {
-    console.error('Player cannot afford industry:', totalCost, player.money)
-    return draft
+    return { valid: false, error: 'Player cannot afford industry' }
   }
   
-  // Validate resource requirements
   if (coalUsed < tile.coalCost || ironUsed < tile.ironCost) {
-    console.error('Insufficient resources for industry:', coalUsed, ironUsed, tile.coalCost, tile.ironCost)
+    return { valid: false, error: 'Insufficient resources for industry' }
+  }
+  
+  return { valid: true, player, location, tile, tileIndex, availableTiles, totalCost } as const
+}
+
+/**
+ * Purchase resources from market for industry building
+ */
+function purchaseIndustryResources(draft: GameState, coalUsed: number, ironUsed: number) {
+  if (coalUsed > 0) {
+    const coalPurchase = purchaseFromMarket(draft.market, 'coal', coalUsed)
+    if (!coalPurchase.success) {
+      return { success: false, error: 'Could not purchase required coal' }
+    }
+  }
+  
+  if (ironUsed > 0) {
+    const ironPurchase = purchaseFromMarket(draft.market, 'iron', ironUsed)
+    if (!ironPurchase.success) {
+      return { success: false, error: 'Could not purchase required iron' }
+    }
+  }
+  
+  return { success: true }
+}
+
+/**
+ * Handle building an industry at a location
+ */
+function buildIndustry(draft: GameState, action: BuildIndustryAction): GameState {
+  const { playerId, locationId, coalUsed, ironUsed } = action
+  
+  // Validate the industry build
+  const validation = validateIndustryBuild(draft, action)
+  if (!validation.valid) {
+    logGameError(validation.error, action)
     return draft
   }
   
-  // Check if location has space
-  const industriesAtLocation = draft.board.builtIndustries.filter(ind => ind.locationId === locationId)
-  if (industriesAtLocation.length >= location.industrySlots) {
-    console.error('Location is full:', locationId)
+  const { player, tile, tileIndex, availableTiles, totalCost } = validation
+  
+  // Type assertion to ensure we have the required properties
+  if (!player || !tile || tileIndex === undefined || !availableTiles || totalCost === undefined) {
+    logGameError('Invalid validation result', action)
+    return draft
+  }
+  
+  // Purchase resources from market
+  const resourcePurchase = purchaseIndustryResources(draft, coalUsed, ironUsed)
+  if (!resourcePurchase.success) {
+    logGameError(resourcePurchase.error || 'Resource purchase failed', action, { coalUsed, ironUsed })
     return draft
   }
   
@@ -221,23 +270,6 @@ function buildIndustry(draft: GameState, action: BuildIndustryAction): GameState
     playerId,
     used: false,
     flipped: false
-  }
-  
-  // Purchase resources from market
-  if (coalUsed > 0) {
-    const coalPurchase = purchaseFromMarket(draft.market, 'coal', coalUsed)
-    if (!coalPurchase.success) {
-      console.error('Could not purchase required coal')
-      return draft
-    }
-  }
-  
-  if (ironUsed > 0) {
-    const ironPurchase = purchaseFromMarket(draft.market, 'iron', ironUsed)
-    if (!ironPurchase.success) {
-      console.error('Could not purchase required iron')
-      return draft
-    }
   }
   
   // Apply changes
@@ -253,80 +285,82 @@ function buildIndustry(draft: GameState, action: BuildIndustryAction): GameState
 }
 
 /**
- * Handle developing a location (building a connection)
+ * Validate connection development requirements
  */
-function developLocation(draft: GameState, action: DevelopLocationAction): GameState {
+function validateConnectionDevelopment(draft: GameState, action: DevelopLocationAction):
+  | { valid: false; error: string }
+  | { valid: true; player: Player; connection: any; totalCost: number } {
   const { playerId, connectionId, coalUsed, ironUsed } = action
   
-  // Find player and validate
   const player = draft.players.find(p => p.id === playerId)
   if (!player) {
-    console.error('Player not found:', playerId)
-    return draft
+    return { valid: false, error: 'Player not found' }
   }
   
-  // Validate it's player's turn
   if (draft.players[draft.currentPlayer].id !== playerId) {
-    console.error('Not player turn:', playerId)
-    return draft
+    return { valid: false, error: 'Not player turn' }
   }
   
-  // Validate player has actions remaining
   if (player.actionsRemaining <= 0) {
-    console.error('No actions remaining for player:', playerId)
-    return draft
+    return { valid: false, error: 'No actions remaining' }
   }
   
-  // Find connection
   const connection = draft.board.connections.find(c => c.id === connectionId)
   if (!connection) {
-    console.error('Connection not found:', connectionId)
-    return draft
+    return { valid: false, error: 'Connection not found' }
   }
   
-  // Validate connection is available in current era
   if (connection.era !== draft.era && connection.era !== 'both') {
-    console.error('Connection not available in current era:', connectionId, draft.era)
-    return draft
+    return { valid: false, error: 'Connection not available in current era' }
   }
   
-  // Validate connection is not already built
   if (draft.board.builtConnections.includes(connectionId)) {
-    console.error('Connection already built:', connectionId)
-    return draft
+    return { valid: false, error: 'Connection already built' }
   }
   
-  // Validate player can afford connection
   const resourceCost = (coalUsed * getLowestResourcePrice(draft.market, 'coal')) + (ironUsed * getLowestResourcePrice(draft.market, 'iron'))
   const totalCost = connection.cost + resourceCost
   
   if (player.money < totalCost) {
-    console.error('Player cannot afford connection:', totalCost, player.money)
+    return { valid: false, error: 'Player cannot afford connection' }
+  }
+  
+  return { valid: true, player, connection, totalCost }
+}
+
+/**
+ * Handle developing a location (building a connection)
+ */
+function developLocation(draft: GameState, action: DevelopLocationAction): GameState {
+  const { coalUsed, ironUsed } = action
+  
+  // Validate the connection development
+  const validation = validateConnectionDevelopment(draft, action)
+  if (!validation.valid) {
+    logGameError(validation.error, action)
     return draft
   }
   
-  // Purchase resources from market
-  if (coalUsed > 0) {
-    const coalPurchase = purchaseFromMarket(draft.market, 'coal', coalUsed)
-    if (!coalPurchase.success) {
-      console.error('Could not purchase required coal')
-      return draft
-    }
+  const { player, connection, totalCost } = validation
+  
+  // Type assertion to ensure we have the required properties
+  if (!player || !connection || totalCost === undefined) {
+    logGameError('Invalid validation result', action)
+    return draft
   }
   
-  if (ironUsed > 0) {
-    const ironPurchase = purchaseFromMarket(draft.market, 'iron', ironUsed)
-    if (!ironPurchase.success) {
-      console.error('Could not purchase required iron')
-      return draft
-    }
+  // Purchase resources from market (reuse helper function)
+  const resourcePurchase = purchaseIndustryResources(draft, coalUsed, ironUsed)
+  if (!resourcePurchase.success) {
+    logGameError(resourcePurchase.error || 'Resource purchase failed', action, { coalUsed, ironUsed })
+    return draft
   }
   
   // Apply changes
   player.money -= totalCost
   player.actionsRemaining--
-  player.connections.push(connectionId)
-  draft.board.builtConnections.push(connectionId)
+  player.connections.push(action.connectionId)
+  draft.board.builtConnections.push(action.connectionId)
   
   // Add victory points
   player.victoryPoints += connection.victoryPoints
@@ -343,31 +377,32 @@ function sellGoods(draft: GameState, action: SellGoodsAction): GameState {
   // Find player and validate
   const player = draft.players.find(p => p.id === playerId)
   if (!player) {
-    console.error('Player not found:', playerId)
+    logGameError('Player not found', action, { playerId })
     return draft
   }
   
   // Find industry
   const industry = draft.board.builtIndustries.find(ind => ind.id === industryId && ind.playerId === playerId)
   if (!industry) {
-    console.error('Industry not found or not owned by player:', industryId, playerId)
+    logGameError('Industry not found or not owned by player', action, { industryId, playerId })
     return draft
   }
   
   // Validate industry can produce goods
   if (industry.type === 'coal' || industry.type === 'iron') {
-    console.error('Cannot sell goods from resource industries')
+    logGameError('Cannot sell goods from resource industries', action, { industryType: industry.type })
     return draft
   }
   
   // Validate industry is not already used/flipped
   if (industry.flipped) {
-    console.error('Industry already used this era:', industryId)
+    logGameError('Industry already used this era', action, { industryId })
     return draft
   }
   
-  // Handle external market sales
+  // Handle different market types
   if (marketType === 'external') {
+    // External market sales (existing implementation)
     let goodType: 'cotton' | 'manufacturedGoods' | 'pottery'
     
     switch (industry.type) {
@@ -381,19 +416,66 @@ function sellGoods(draft: GameState, action: SellGoodsAction): GameState {
         goodType = 'pottery'
         break
       default:
-        console.error('Industry cannot sell to external markets:', industry.type)
+        logGameError('Industry cannot sell to external markets', action, { industryType: industry.type })
         return draft
     }
     
     const sale = sellToMarket(draft.externalMarkets, goodType, goodsAmount)
     if (!sale.success) {
-      console.error('Could not sell goods to external market')
+      logGameError('Could not sell goods to external market', action, { goodType, goodsAmount })
       return draft
     }
     
     // Apply income and flip industry
     player.money += sale.income
     industry.flipped = true
+  } else if (marketType === 'local') {
+    // Local market sales - sell to other players' industries in same location
+    // For now, simplified logic - just check for cotton mills that need cotton
+    const localDemand = draft.board.builtIndustries.filter(ind => 
+      ind.locationId === industry.locationId && 
+      ind.playerId !== playerId &&
+      !ind.flipped &&
+      (ind.type === 'manufactured_goods' && industry.type === 'cotton') // Cotton mills need cotton
+    )
+    
+    if (localDemand.length === 0) {
+      logGameError('No local demand for goods', action, { industryType: industry.type, locationId: industry.locationId })
+      return draft
+    }
+    
+    // Sell to first available local consumer (simplified logic)
+    const consumer = localDemand[0]
+    const salePrice = 2 * goodsAmount // Fixed price for local sales
+    
+    player.money += salePrice
+    industry.flipped = true
+    consumer.used = true // Mark consumer as having used goods
+  } else if (marketType === 'distant') {
+    // Distant market sales - sell through network connections
+    // Check if player has network connection to a market location
+    // For now, simplified - assume Liverpool and other ports are market locations
+    const marketLocations = draft.board.locations.filter(loc => 
+      loc.name.includes('Liverpool') || loc.name.includes('Port')
+    )
+    const playerConnectedLocations = getConnectedLocations(draft, playerId)
+    
+    const accessibleMarkets = marketLocations.filter(market => 
+      playerConnectedLocations.includes(market.id)
+    )
+    
+    if (accessibleMarkets.length === 0) {
+      logGameError('No accessible distant markets', action, { playerId, industryType: industry.type })
+      return draft
+    }
+    
+    // Use first accessible market (simplified logic)
+    const salePrice = 1 * goodsAmount // Lower price for distant sales
+    player.money += salePrice
+    industry.flipped = true
+  } else {
+    logGameError('Invalid market type', action, { marketType })
+    return draft
   }
   
   return draft
@@ -646,7 +728,7 @@ function endGame(draft: GameState): GameState {
   draft.players.forEach(player => {
     const industryPoints = player.industries.reduce((sum, ind) => sum + ind.victoryPoints, 0)
     const connectionPoints = player.victoryPoints // Already accumulated from connections
-    const moneyPoints = Math.floor(player.money / 4)
+    const moneyPoints = Math.floor(player.money / MONEY_TO_VICTORY_POINTS_RATIO)
     
     finalScores[player.id] = {
       industryPoints,
@@ -667,6 +749,32 @@ function endGame(draft: GameState): GameState {
 function resetGame(draft: GameState): GameState {
   // This would reset to initial state - implementation depends on requirements
   return draft
+}
+
+/**
+ * Get all locations connected to a player through their network
+ */
+function getConnectedLocations(state: GameState, playerId: string): string[] {
+  const player = state.players.find(p => p.id === playerId)
+  if (!player) return []
+  
+  const connectedLocations = new Set<string>()
+  
+  // Add locations with player's industries
+  state.board.builtIndustries
+    .filter(ind => ind.playerId === playerId)
+    .forEach(ind => connectedLocations.add(ind.locationId))
+  
+  // Add locations connected through player's connections
+  player.connections.forEach(connectionId => {
+    const connection = state.board.connections.find(c => c.id === connectionId)
+    if (connection) {
+      connectedLocations.add(connection.from)
+      connectedLocations.add(connection.to)
+    }
+  })
+  
+  return Array.from(connectedLocations)
 }
 
 /**

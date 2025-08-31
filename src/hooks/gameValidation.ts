@@ -1,5 +1,6 @@
 import type { GameState, Player, Connection } from '@/types'
 import type { GameAction, BuildIndustryAction, DevelopLocationAction, SellGoodsAction } from '@/types'
+import { ERA_TURN_LIMITS, PLAYER_COUNT_CONFIG, CARD_MANAGEMENT } from '@/data'
 
 /**
  * Validation result interface
@@ -353,7 +354,7 @@ function getBeerAvailableToIndustry(state: GameState, industry: { playerId: stri
  */
 export function validateGameState(state: GameState): ValidationResult {
   // Check player count
-  if (state.players.length < 2 || state.players.length > 4) {
+  if (state.players.length < PLAYER_COUNT_CONFIG.min || state.players.length > PLAYER_COUNT_CONFIG.max) {
     return { valid: false, error: 'Invalid player count' }
   }
   
@@ -382,7 +383,7 @@ export function validateGameState(state: GameState): ValidationResult {
       return { valid: false, error: `Player ${player.id} has negative actions` }
     }
     
-    if (player.hand.length > 8) {
+    if (player.hand.length > CARD_MANAGEMENT.maxHandSize) {
       return { valid: false, error: `Player ${player.id} has too many cards` }
     }
   }
@@ -408,7 +409,7 @@ export function validateGameState(state: GameState): ValidationResult {
  */
 export function shouldGameEnd(state: GameState): boolean {
   // Game ends at the end of rail era after specified number of turns
-  if (state.era === 'rail' && state.turn > 6) {
+  if (state.era === 'rail' && state.turn > ERA_TURN_LIMITS.rail) {
     return true
   }
   
