@@ -35,3 +35,4 @@ coverage
 
 # Build
 build
+.playwright-mcp
